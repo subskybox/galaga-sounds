@@ -74,8 +74,8 @@
 // Bit0=voice0, Bit1=voice1, Bit2=voice2. Default 0x07 (all enabled).
 volatile uint8_t gVoiceOutMask = 0x07;
 // Pitch scaling used by the original Galaga sound logic (inc *= 3/2).
-#define PITCH_NUM 3
-#define PITCH_DEN 2
+#define PITCH_NUM 393
+#define PITCH_DEN 256 // 393/256 = 1.53515625
 
 // Optional per-sound volume trims (0 = none)
 #define SOUND10_VOL_TRIM 5  // reduce raw volume by 1 step for sound 10
@@ -91,9 +91,9 @@ volatile uint8_t gVoiceOutMask = 0x07;
 #define S23_EXPLOSION_TICKS    250    // ~2.08s at 120 Hz (derived in ISR)
 #define S23_NOISE_DIV          16     // update LFSR every N samples (lower CPU, darker)
 #define S23_BROWN_LEAK_SHIFT   4      // lower => bassier (4..6)
-#define S23_LP_SHIFT        5      // low-pass: y += (x-y)>>SHIFT (higher => darker, cheaper)
-#define S23_GAIN_NUM        175    // post-gain multiplier numerator
-#define S23_GAIN_SHIFT      6      // post-gain shift (gain ≈ 175/64 ≈ 2.734)
+#define S23_LP_SHIFT           5      // low-pass: y += (x-y)>>SHIFT (higher => darker, cheaper)
+#define S23_GAIN_NUM           175    // post-gain multiplier numerator
+#define S23_GAIN_SHIFT         6      // post-gain shift (gain ≈ 175/64 ≈ 2.734)
 
 // 2-stage decay envelope knee
 #define S23_STAGE1_TICKS       125    // first stage duration (ticks)
