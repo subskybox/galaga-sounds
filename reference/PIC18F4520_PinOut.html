@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>PIC18F4520 Breadboard Mapper</title>
+
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; }
+  input { font-size: 16px; width: 80px; }
+  #info { margin-top: 12px; font-size: 18px; font-weight: bold; }
+
+  .pinbox {
+    stroke: #000;
+    stroke-width: 1;
+    cursor: pointer;
+  }
+
+  .porta { fill:#e74c3c; }
+  .portb { fill:#3498db; }
+  .portc { fill:#f1c40f; }
+  .portd { fill:#2ecc71; }
+  .porte { fill:#1abc9c; }
+  .pwr   { fill:#7f8c8d; }
+
+  .highlight {
+    stroke-width: 3;
+  }
+</style>
+</head>
+
+<body>
+
+<h2>PIC18F4520 Breadboard Row Mapper</h2>
+
+Pin 1 breadboard row:
+<input type="number" id="pin1row" value="5">
+<button onclick="update()">Apply</button>
+
+<div id="info">Hover over a pin</div>
+
+<!-- ================= SVG PINOUT ================= -->
+
+<svg width="1100" height="720" viewBox="0 0 1100 720">
+
+<!-- CHIP BODY -->
+<rect x="420" y="80" width="260" height="520" rx="25"
+      fill="#fff" stroke="#000" stroke-width="2"/>
+
+<!-- NOTCH -->
+<path d="M515 80 q35 35 70 0" fill="#000"/>
+
+<!-- PIN 1 DOT -->
+<circle cx="430" cy="95" r="6" fill="black"/>
+
+<!-- LABEL -->
+<text x="550" y="350" font-size="26" text-anchor="middle"
+      transform="rotate(-90 550 350)">PIC18F4520</text>
+
+<!-- LEFT PINS -->
+<g text-anchor="end">
+  <rect id="pin1"  x="380" y="105" width="20" height="16" class="pinbox pwr"/>
+  <text x="370" y="118">1 MCLR/VPP/RE3</text>
+
+  <rect id="pin2"  x="380" y="130" width="20" height="16" class="pinbox porta"/>
+  <text x="370" y="143">2 RA0 / AN0</text>
+
+  <rect id="pin3"  x="380" y="155" width="20" height="16" class="pinbox porta"/>
+  <text x="370" y="168">3 RA1 / AN1</text>
+
+  <rect id="pin4"  x="380" y="180" width="20" height="16" class="pinbox porta"/>
+  <text x="370" y="193">4 RA2 / AN2 / VREF−</text>
+
+  <rect id="pin5"  x="380" y="205" width="20" height="16" class="pinbox porta"/>
+  <text x="370" y="218">5 RA3 / AN3 / VREF+</text>
+
+  <rect id="pin6"  x="380" y="230" width="20" height="16" class="pinbox porta"/>
+  <text x="370" y="243">6 RA4 / T0CKI</text>
+
+  <rect id="pin7"  x="380" y="255" width="20" height="16" class="pinbox porta"/>
+  <text x="370" y="268">7 RA5 / AN4 / SS</text>
+
+  <rect id="pin8"  x="380" y="280" width="20" height="16" class="pinbox porte"/>
+  <text x="370" y="293">8 RE0 / RD / AN5</text>
+
+  <rect id="pin9"  x="380" y="305" width="20" height="16" class="pinbox porte"/>
+  <text x="370" y="318">9 RE1 / WR / AN6</text>
+
+  <rect id="pin10" x="380" y="330" width="20" height="16" class="pinbox porte"/>
+  <text x="370" y="343">10 RE2 / CS / AN7</text>
+
+  <rect id="pin11" x="380" y="355" width="20" height="16" class="pinbox pwr"/>
+  <text x="370" y="368">11 VDD</text>
+
+  <rect id="pin12" x="380" y="380" width="20" height="16" class="pinbox pwr"/>
+  <text x="370" y="393">12 VSS</text>
+
+  <rect id="pin13" x="380" y="405" width="20" height="16" class="pinbox pwr"/>
+  <text x="370" y="418">13 OSC1 / CLKI</text>
+
+  <rect id="pin14" x="380" y="430" width="20" height="16" class="pinbox pwr"/>
+  <text x="370" y="443">14 OSC2 / CLKO</text>
+
+  <rect id="pin15" x="380" y="455" width="20" height="16" class="pinbox portc"/>
+  <text x="370" y="468">15 RC0 / T1OSO</text>
+
+  <rect id="pin16" x="380" y="480" width="20" height="16" class="pinbox portc"/>
+  <text x="370" y="493">16 RC1 / T1OSI</text>
+
+  <rect id="pin17" x="380" y="505" width="20" height="16" class="pinbox portc"/>
+  <text x="370" y="518">17 RC2 / CCP1</text>
+
+  <rect id="pin18" x="380" y="530" width="20" height="16" class="pinbox portc"/>
+  <text x="370" y="543">18 RC3 / SCK</text>
+
+  <rect id="pin19" x="380" y="555" width="20" height="16" class="pinbox portd"/>
+  <text x="370" y="568">19 RD0 / PSP0</text>
+
+  <rect id="pin20" x="380" y="580" width="20" height="16" class="pinbox portd"/>
+  <text x="370" y="593">20 RD1 / PSP1</text>
+</g>
+
+<!-- RIGHT PINS -->
+<g>
+  <rect id="pin21" x="700" y="580" width="20" height="16" class="pinbox portd"/>
+  <text x="725" y="593">21 RD2 / PSP2</text>
+
+  <rect id="pin22" x="700" y="555" width="20" height="16" class="pinbox portd"/>
+  <text x="725" y="568">22 RD3 / PSP3</text>
+
+  <rect id="pin23" x="700" y="530" width="20" height="16" class="pinbox portc"/>
+  <text x="725" y="543">23 RC4 / SDI</text>
+
+  <rect id="pin24" x="700" y="505" width="20" height="16" class="pinbox portc"/>
+  <text x="725" y="518">24 RC5 / SDO</text>
+
+  <rect id="pin25" x="700" y="480" width="20" height="16" class="pinbox portc"/>
+  <text x="725" y="493">25 RC6 / TX</text>
+
+  <rect id="pin26" x="700" y="455" width="20" height="16" class="pinbox portc"/>
+  <text x="725" y="468">26 RC7 / RX</text>
+
+  <rect id="pin27" x="700" y="430" width="20" height="16" class="pinbox portd"/>
+  <text x="725" y="443">27 RD4 / PSP4</text>
+
+  <rect id="pin28" x="700" y="405" width="20" height="16" class="pinbox portd"/>
+  <text x="725" y="418">28 RD5 / PSP5</text>
+
+  <rect id="pin29" x="700" y="380" width="20" height="16" class="pinbox portd"/>
+  <text x="725" y="393">29 RD6 / PSP6</text>
+
+  <rect id="pin30" x="700" y="355" width="20" height="16" class="pinbox portd"/>
+  <text x="725" y="368">30 RD7 / PSP7</text>
+
+  <rect id="pin31" x="700" y="330" width="20" height="16" class="pinbox pwr"/>
+  <text x="725" y="343">31 VSS</text>
+
+  <rect id="pin32" x="700" y="305" width="20" height="16" class="pinbox pwr"/>
+  <text x="725" y="318">32 VDD</text>
+
+  <rect id="pin33" x="700" y="280" width="20" height="16" class="pinbox portb"/>
+  <text x="725" y="293">33 RB0 / INT0</text>
+
+  <rect id="pin34" x="700" y="255" width="20" height="16" class="pinbox portb"/>
+  <text x="725" y="268">34 RB1 / INT1</text>
+
+  <rect id="pin35" x="700" y="230" width="20" height="16" class="pinbox portb"/>
+  <text x="725" y="243">35 RB2 / INT2</text>
+
+  <rect id="pin36" x="700" y="205" width="20" height="16" class="pinbox portb"/>
+  <text x="725" y="218">36 RB3 / CCP2</text>
+
+  <rect id="pin37" x="700" y="180" width="20" height="16" class="pinbox portb"/>
+  <text x="725" y="193">37 RB4 / KBI0</text>
+
+  <rect id="pin38" x="700" y="155" width="20" height="16" class="pinbox portb"/>
+  <text x="725" y="168">38 RB5 / KBI1</text>
+
+  <rect id="pin39" x="700" y="130" width="20" height="16" class="pinbox portb"/>
+  <text x="725" y="143">39 RB6 / PGC</text>
+
+  <rect id="pin40" x="700" y="105" width="20" height="16" class="pinbox portb"/>
+  <text x="725" y="118">40 RB7 / PGD</text>
+</g>
+
+</svg>
+
+<script>
+function pinToRow(pin, pin1row) {
+  if (pin <= 20) return pin1row + pin - 1;
+  return pin1row + (40 - pin);
+}
+
+function update() {
+  const pin1row = parseInt(document.getElementById("pin1row").value);
+
+  document.querySelectorAll(".pinbox").forEach(p => {
+    const pin = parseInt(p.id.replace("pin",""));
+    const row = pinToRow(pin, pin1row);
+
+    p.onmouseenter = () => {
+      p.classList.add("highlight");
+      document.getElementById("info").innerText =
+        `Pin ${pin} → Breadboard row ${row}`;
+    };
+
+    p.onmouseleave = () => {
+      p.classList.remove("highlight");
+    };
+  });
+}
+update();
+</script>
+
+</body>
+</html>

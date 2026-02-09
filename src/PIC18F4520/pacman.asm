@@ -1,0 +1,1015 @@
+;; 
+;;  $Id: pacman.asm,v 1.5 2008/06/26 17:19:22 fvecoven Exp $
+;; 
+;;  Copyright (C) 2008 Frederic Vecoven
+;; 
+;;  This file is part of Pacsound
+;; 
+;;  Pacsound is free software; you can redistribute it and/or modify
+;;  it under the terms of the GNU General Public License as published by
+;;  the Free Software Foundation; either version 3 of the License, or
+;;  (at your option) any later version.
+;; 
+;;  Pacsound is distributed in the hope that it will be useful,
+;;  but WITHOUT ANY WARRANTY; without even the implied warranty of
+;;  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;;  GNU General Public License for more details.
+;; 
+;;  You should have received a copy of the GNU General Public License
+;;  along with this program. If not, see <http://www.gnu.org/licenses/>
+;; 
+
+	list p=18f4520
+	#include p18f4520.inc
+
+
+	;
+	; BANK 1
+	;
+var_1	UDATA	0x100
+
+Vol		res	1	; volume
+Freq		res	2	; frequency
+
+Effect		res	1	; effect number
+EffInit		res	1	; initialized boolean
+EffD		res	1	; "D" data
+EffBaseFreq	res	1	; base frequency
+EffTable	res	8	; copy of data from effect table
+EffDuration	res	1	; duration
+EffType		res	1	; type
+
+Wave		res	1
+WaveInit	res	1
+WaveD		res	1
+WaveBaseFreq	res	1
+WaveVol		res	1
+WaveRom		res	2
+WaveType	res	1
+Wave9		res	1
+Wave4		res	1
+WaveDuration	res	1
+WaveWSel	res	1
+WaveScale	res	1
+
+	GLOBAL	Effect, Wave
+	
+	
+	; 
+	; BANK 2
+	;
+var_2	UDATA	0x200
+
+Effect2		res	30
+	
+	; 
+	; BANK 3
+	;
+var_3	UDATA	0x300
+
+Effect3		res	30
+
+
+
+; variables from main module
+	extern	temp0, temp1, gType, gVol, hCount, Flags
+	extern v0_hFreq_L, v0_hFreq_M, v0_hFreq_H, v0_hWaveSel, v0_hVol
+	extern v1_hFreq_L, v1_hFreq_M, v1_hFreq_H, v1_hWaveSel, v1_hVol
+	extern v2_hFreq_L, v2_hFreq_M, v2_hFreq_H, v2_hWaveSel, v2_hVol
+; functions from main module
+	extern fix_voices
+
+
+pacman_code	CODE
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; INSTALL PACMAN WAVETABLE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+pacman_wavetable
+	GLOBAL	pacman_wavetable
+
+	clrf	TBLPTRU
+	movlw	high(pacman_wavetable_data)
+	movwf	TBLPTRH
+	movlw	low(pacman_wavetable_data)
+	movwf	TBLPTRL
+	lfsr	FSR1, 0x400		; bank 4
+	clrf	temp0
+cwt	tblrd*+
+	movf	TABLAT, w
+	movwf	POSTINC1
+	decfsz	temp0
+	bra	cwt
+	lfsr	FSR2, 0x400		; FSR2 = pointer to wavetable
+	return
+		
+
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; SOUND REFRESH (60Hz)
+;
+; Process effects and wave for all voices
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+pacman_refresh	
+	GLOBAL	pacman_refresh
+
+	movlb	0x1			; voice 0
+	call	process_voice
+	call	copy_voice0
+	movlb	0x2			; voice 1
+	call	process_voice
+	call	copy_voice1
+	movlb	0x3			; voice 2
+	call	process_voice
+	call	copy_voice2
+	call	fix_voices
+	return
+	
+process_voice
+	call	process_effect		; EFFECT
+	movwf	gVol
+	call	process_wave		; WAVE
+	tstfsz	Wave			; if (wave != 0)
+	movwf	gVol			; then vol = volume from wave 
+	return
+
+
+copy_voice0
+	swapf	Freq, w
+	andlw	0xF0
+	movwf	v0_hFreq_L
+	swapf	Freq, w
+	andlw	0x0F
+	movwf	temp0
+	swapf	Freq+1, w
+	andlw	0xF0
+	iorwf	temp0, w
+	movwf	v0_hFreq_M
+	swapf	Freq+1, w
+	andlw	0x0F
+	movwf	v0_hFreq_H
+
+	movf	EffTable, w
+	tstfsz	Wave
+	movf	WaveWSel, w
+	andlw	0x7
+	movwf	v0_hWaveSel
+	movf	gVol, w
+	andlw	0xf
+	movwf	v0_hVol
+	return
+
+copy_voice1
+	clrf	v1_hFreq_L
+	movf	Freq, w
+	movwf	v1_hFreq_M
+	movf	Freq+1, w
+	movwf	v1_hFreq_H
+	movf	EffTable, w
+	tstfsz	Wave
+	movf	WaveWSel, w
+	andlw	0x7
+	movwf	v1_hWaveSel
+	movf	gVol, w
+	andlw	0xf
+	movwf	v1_hVol
+	return
+
+copy_voice2
+	clrf	v2_hFreq_L
+	movf	Freq, w
+	movwf	v2_hFreq_M
+	movf	Freq+1, w
+	movwf	v2_hFreq_H
+	movf	EffTable, w
+	tstfsz	Wave
+	movf	WaveWSel, w
+	andlw	0x7
+	movwf	v2_hWaveSel
+	movf	gVol, w
+	andlw	0xf
+	movwf	v2_hVol
+	return
+	
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; EFFECT voice 
+;
+; Voice 1 variables in bank 1
+; Voice 2 variables in bank 2
+;
+; Returns volume
+; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+process_effect
+	tstfsz	Effect			; if (effect != 0) then
+	bra	init_effect		; goto init_effect
+
+	tstfsz	EffInit			; if (init == 0) then
+	bra	clear_effect
+	retlw	.0			; return
+clear_effect				; 	else
+	clrf	EffInit			; init data
+	clrf	EffD
+	clrf	EffBaseFreq
+	clrf	Vol
+	clrf	Freq
+	clrf	Freq+1
+	retlw	.0
+	
+init_effect
+	tstfsz	EffInit			; if (init != 0) then
+	bra	play_effect		; goto play_effect
+	
+	incf	EffInit, f
+	
+			; Pointer to start of effect table
+	movlw	high(effect_table_0)
+	movwf	TBLPTRH
+	movlw	low(effect_table_0)
+	movwf	TBLPTRL
+			; Each effect is 8 bytes, so add 8 * (Effect - 1)
+	decf	Effect, w
+	rlncf	WREG, w
+	rlncf	WREG, w
+	rlncf	WREG, w
+	addwf	TBLPTRL, f
+	btfsc	STATUS, C
+	incf	TBLPTRH, f
+			; populate table (8 bytes)
+	tblrd*+
+	movf	TABLAT, w
+	movwf	EffTable
+	tblrd*+
+	movf	TABLAT, w
+	movwf	EffTable+1
+	tblrd*+
+	movf	TABLAT, w
+	movwf	EffTable+2
+	tblrd*+
+	movf	TABLAT, w
+	movwf	EffTable+3
+	tblrd*+
+	movf	TABLAT, w
+	movwf	EffTable+4
+	tblrd*+
+	movf	TABLAT, w
+	movwf	EffTable+5	
+	tblrd*+
+	movf	TABLAT, w
+	movwf	EffTable+6
+	tblrd*+
+	movf	TABLAT, w
+	movwf	EffTable+7
+
+	movf	EffTable+3, w		; duration = table[3] & 0x7f
+	andlw	0x7f
+	movwf	EffDuration
+	
+	movf	EffTable+1, w		; baseFreq = table[1]
+	movwf	EffBaseFreq
+	
+	swapf	EffTable+6, w		; type = table[6] >> 4;
+	andlw	0x0F
+	movwf	EffType
+	
+	btfsc	EffType, 3		; if ((type & 0x8) != 0) then
+	bra	play_effect		; goto play_effect
+	movf	EffTable+6, w
+	movwf	Vol			; vol = table[6]
+	clrf	EffD			; Ddata = 0
+	
+play_effect
+	decfsz	EffDuration		; if (--duration != 0) then
+	bra	update_freq		; goto update_freq
+					
+			; duration is now 0, check 2nd counter
+	tstfsz	EffTable+5
+	bra	pe_1
+	bra	pe_2
+pe_1	decfsz	EffTable+5			; then table[5]--
+	bra	pe_2			; if (table[5] != 0) then goto pe_2
+			; 2nd counter is now 0, we are done with this effect
+	clrf	Effect
+	retlw	.0
+
+pe_2			; duration is 0. Re-init it.
+	movf	EffTable+3, w		; duration = table[3] & 0x7f
+	andlw	0x7f
+	movwf	EffDuration
+	
+	btfss	EffTable+3, 7		; if ((table[3] & 0x80) != 0) 
+	bra	pe_4
+	negf	EffTable+2			; then	table[2] = - table[2]
+	btfsc	EffD, 0			;	if ((Ddata & 0x1) == 0) then
+	bra	pe_3
+	bsf	EffD, 0			;		Ddata |= 0x1
+	bra	update_freq
+pe_3
+	bcf	EffD, 0	
+pe_4
+	movf	EffTable+4, w
+	addwf	EffTable+1, f		; table[1] += table[4]
+	
+	movf	EffTable+1, w
+	movwf	EffBaseFreq		; base_freq = table[1]
+	
+	movf	EffTable+7, w
+	addwf	EffTable+6, f		; table[6] += table[7]
+	
+	btfsc	EffType, 3		; if ((type & 0x8) == 0) 
+	bra	update_freq
+	movf	EffTable+6, w		; then
+	movwf	Vol			; 	vol = table[6]
+	
+update_freq
+	movf	EffTable+2, w
+	addwf	EffBaseFreq, f		; baseFreq += table[2]
+	
+			; we need to compute freq_base * 2^((table[0] & 0x70) >> 4)
+	movf	EffTable, w
+	andlw	0x70
+	swapf	WREG, w
+	movwf	temp0			; temp0 = (table[0] & 0x70) >> 4
+	
+	movf	EffBaseFreq, w
+	movwf	Freq
+	clrf	Freq+1			; freq = freq_base
+	
+	tstfsz	temp0			; if (temp0 != 0) then
+	bra	uf_1			; 	do the " * 2^x " as a sum
+	bra	uf_2			; else goto uf_1 (no addition required)
+uf_1
+	movf	Freq, w
+	addwf	Freq, f
+	movf	Freq+1, w
+	addwfc	Freq+1, f		; freq += freq (16 bits)
+	decfsz	temp0
+	bra	uf_1
+
+uf_2
+	movf	EffType, w
+	movwf	gType
+	movf	Vol, w
+	movwf	gVol
+	call	update_volume		; compute new volume
+	movwf	Vol
+	return				; and return
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; STOP ALL PACMAN SOUNDS
+;
+; pacman_refresh uses 3 “voice contexts” by swapping movlb:
+;   bank1: real variables (Vol/Freq/Effect/Wave/...)
+;   bank2: Effect2[30] overlay (same layout as bank1 voice vars)
+;   bank3: Effect3[30] overlay (same layout as bank1 voice vars)
+;
+; Clearing 30 bytes in each bank reliably resets BOTH effect + wave engines.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+pacman_stop_all
+    GLOBAL  pacman_stop_all
+
+    ; -------- clear voice0 state: bank 1 vars starting at Vol --------
+    movlb   0x1
+    lfsr    FSR1, Vol          ; Vol is the first byte of the voice context
+    movlw   .30
+    movwf   temp0
+psa_b1
+    clrf    POSTINC1
+    decfsz  temp0, f
+    bra     psa_b1
+
+    ; -------- clear voice1 state: bank 2 overlay --------
+    movlb   0x2
+    lfsr    FSR1, Effect2
+    movlw   .30
+    movwf   temp0
+psa_b2
+    clrf    POSTINC1
+    decfsz  temp0, f
+    bra     psa_b2
+
+    ; -------- clear voice2 state: bank 3 overlay --------
+    movlb   0x3
+    lfsr    FSR1, Effect3
+    movlw   .30
+    movwf   temp0
+psa_b3
+    clrf    POSTINC1
+    decfsz  temp0, f
+    bra     psa_b3
+
+    ; -------- mute output immediately (hardware voices) --------
+    movlb   0x0               ; access/main
+    clrf    v0_hVol
+    clrf    v1_hVol
+    clrf    v2_hVol
+    call    fix_voices
+
+    clrf    LATD              ; optional immediate DAC=0 (safe here)
+
+    return
+
+;
+; UPDATE VOLUME subroutine
+;
+; Enter with :
+; - gVol = current volume
+; - gType = current type
+; 
+; Returns :
+; - W = new volume
+;
+update_volume
+	movf	gVol, w	
+	tstfsz	gType		; type 0 : constant volume
+	bra	uv_1
+	return				; if (type == 0) return vol
+
+uv_1	movlw	.1
+	cpfseq	gType
+	bra	uv_2
+				; type 1
+	movf	gVol, w
+	bra	uv_dec
+	
+uv_2	movlw	.2
+	cpfseq	gType
+	bra	uv_3
+				; type 2
+	movf	hCount, w
+	andlw	0x01
+uv_skip
+	movf	gVol, w
+	btfss	STATUS, Z
+	return
+uv_dec
+	andlw	0x0f
+	btfsc	STATUS, Z
+	return
+	decf	WREG, w
+	return
+	
+uv_3	movlw	.3
+	cpfseq	gType
+	bra	uv_4
+				; type 3
+	movf	hCount, w
+	andlw	0x03
+	bra	uv_skip
+	
+uv_4	movlw	.4
+	cpfseq	gType
+	bra	uv_other
+				; type 4
+	movf	hCount, w
+	andlw	0x07
+	bra	uv_skip
+	
+uv_other
+	retlw	.0
+	
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; WAVE voice 
+;
+; Voice 1 variables in bank 1
+; Voice 2 variables in bank 2
+; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+process_wave
+	tstfsz	Wave			; if (wave != 0) then
+	bra	init_wave		; goto init_wave
+pw_1
+	tstfsz	WaveInit		; if (init == 0) then
+	bra	clear_wave
+	retlw	.0			; return 0
+
+clear_wave
+	clrf	WaveInit
+	clrf	WaveD
+	clrf	WaveBaseFreq
+	clrf	WaveVol
+	clrf	Freq
+	clrf	Freq+1
+	retlw	.0
+
+init_wave
+	tstfsz	WaveInit		; if (init != 0) then
+	bra	play_wave		; goto play_wave
+	
+	incf	WaveInit, f
+	
+				; pointer to the song table
+	movlw	high(wave_table_0)
+	movwf	TBLPTRH
+	movlw	low(wave_table_0)
+	movwf	TBLPTRL
+	
+	decf	Wave, w		; offset to the song = 2 * (Wave - 1)
+	addwf	WREG, w
+	addwf	TBLPTRL, f
+	btfsc	STATUS, C
+	incf	TBLPTRH, f	
+				; dereference pointer to get the song address
+	tblrd*+
+	movf	TABLAT, w
+	movwf	WaveRom+1	; reversed due to the use of 'dw' directive
+	tblrd*+
+	movf	TABLAT, w
+	movwf	WaveRom
+
+pw_2	
+	call	wave_next_byte
+	btfss	STATUS, C
+	bra	wave_update_freq
+	bra	pw_1
+		
+play_wave
+	decfsz	WaveDuration		; if (--duration != 0)
+	bra	wave_update_freq	; then goto wave_update_freq
+	bra	pw_2			; else process next byte	
+	
+wave_update_freq
+	movf	WaveD, w
+	andlw	0x10
+	movwf	WaveScale		; scale = WaveD & 0x10
+	btfsc	STATUS,Z		; if (scale != 0) then
+	bra	wuf_1
+	movlw	.1
+	movwf	WaveScale		; 	scale = 1
+wuf_1	
+	addwf	Wave4, w
+	movwf	WaveScale		; scale += wave4
+	movwf	temp0	
+	
+	movf	WaveBaseFreq, w
+	movwf	Freq
+	clrf	Freq+1
+
+	tstfsz	temp0
+	bra	wuf_2
+	bra	wuf_3
+wuf_2
+	movf	Freq, w
+	addwf	Freq, f
+	movf	Freq+1, w
+	addwfc	Freq+1, f
+	decfsz	temp0
+	bra	wuf_2
+wuf_3
+	movf	WaveType, w
+	movwf	gType
+	movf	WaveVol, w
+	movwf	gVol
+	call	update_volume
+	movwf	WaveVol
+	return
+
+;
+; wave_next_byte : get the next byte of the song and process it
+;
+; Returns with carry set if we got 0xff
+;
+wave_next_byte
+	movf	WaveRom, w		; TBLPTR = WaveRom
+	movwf	TBLPTRH
+	movf	WaveRom+1, w
+	movwf	TBLPTRL
+	tblrd*+				; value = ROM[WaveRom++]
+	movf	TBLPTRH, w
+	movwf	WaveRom
+	movf	TBLPTRL, w
+	movwf	WaveRom+1		; WaveRom = TBLPTR
+	
+	movlw	0xf0
+	cpfslt	TABLAT			; if (value >= 0xF0)
+	bra	special_byte		; then goto special_byte
+	
+	movf	TABLAT, w
+	andlw	0x1f
+	btfsc	STATUS, Z		; if ((value & 0x1f) != 0)
+	bra	wnb_1
+	movf	TABLAT, w		; then WaveD = value
+	movwf	WaveD
+wnb_1
+	btfss	WaveType, 3		; if ((type & 0x8) != 0)
+	bra	wnb_2
+	clrf	WaveVol			; then vol = 0
+	bra	wnb_3
+wnb_2
+	movf	Wave9, w		; else vol = wave9
+	movwf	WaveVol
+wnb_3
+	movf	TABLAT, w
+	andlw	0xE0
+	rrncf	WREG, w
+	rrncf	WREG, w
+	rrncf	WREG, w
+	rrncf	WREG, w
+	rrncf	WREG, w			; w = (value & 0xE0) >> 5
+	call	power
+	movwf	WaveDuration		; duration = 2^w
+	
+	movf	TABLAT, w
+	andlw	0x1f
+	btfss	STATUS, Z		; if ((value & 0x1f) == 0)
+	bra	wnb_4
+	bcf	STATUS, C		; then return NC
+	return
+wnb_4
+	movf	TABLAT, w
+	andlw	0x0f
+	call	get_freq_table
+	movwf	WaveBaseFreq		; base_freq = FREQ_TABLE[value & 0xf]
+	bcf	STATUS, C
+	return
+	
+special_byte
+	movlw	0xf0
+	cpfseq	TABLAT			; F0 : followed by 2 bytes, pointer to next data
+	bra	sb_1
+	tblrd*+
+	movf	TABLAT, w
+	movwf	WaveRom
+	tblrd*
+	movf	TABLAT, w
+	movwf	WaveRom+1		; waverom = new pointer
+	bra	wave_next_byte
+sb_1
+	movlw	0xf1			; F1 : waveform data
+	cpfseq	TABLAT
+	bra	sb_2
+	call	next_byte
+	movwf	WaveWSel		; wave_sel = ROM[waverom++]
+	bra	wave_next_byte
+sb_2
+	movlw	0xf2			; F2 : wave4
+	cpfseq	TABLAT
+	bra	sb_3
+	call	next_byte
+	movwf	Wave4			; wave4 = ROM[waverom++]
+	bra	wave_next_byte	
+sb_3
+	movlw	0xf3			; F3 : wave9
+	cpfseq	TABLAT
+	bra	sb_4
+	call	next_byte
+	movwf	Wave9			; wave9 = ROM[waverom++]
+	bra	wave_next_byte
+sb_4
+	movlw	0xf4			; F4 : type
+	cpfseq	TABLAT
+	bra	sb_5
+	call	next_byte		
+	movwf	WaveType		; wave_type = ROM[waverom++]
+	bra	wave_next_byte	
+sb_5
+	movlw	0xff			; FF : done
+	cpfseq	TABLAT
+	bra	sb_6
+	clrf	Wave			; reset Wave
+	bsf	STATUS, C		; set carry
+	return
+sb_6
+	bra	wave_next_byte
+
+;
+; return byte at WaveRom (in W), increment WaveRom
+;
+next_byte
+	tblrd*+				; read next byte, increment pointer
+	movf	TABLAT, w
+	movwf	temp0			; save value
+	movf	TBLPTRH, w
+	movwf	WaveRom
+	movf	TBLPTRL, w
+	movwf	WaveRom+1		; WaveRom = TBLPTR	
+	movf	temp0, w		; restore value
+	return
+	
+
+;
+; Input : W (3 bits). Output : 2^W (in W)
+;
+power
+	movwf	temp0
+	incf	temp0
+	movlw	.1
+	bra	pow2
+pow1	rlncf	WREG, w
+pow2	decfsz	temp0
+	bra	pow1
+	return
+
+
+;
+; Input : W (4 bits). Output freq (in W)
+;
+get_freq_table
+	movwf	temp0			; save W
+	bcf	STATUS, C
+	rlcf	temp0			; W = 2 * W
+	movlw	high(freq_table)
+	btfsc	STATUS, C
+	incf	WREG, w
+	movwf	PCLATH
+	movlw	low(freq_table)
+	addwf	temp0, w
+	btfsc	STATUS, C
+	incf	PCLATH, f
+	movwf	PCL
+freq_table
+	retlw	0x00		; this table is located at 0x3bb8 in pacman
+	retlw	0x57
+	retlw	0x5c
+	retlw	0x61
+	retlw	0x67
+	retlw	0x6d
+	retlw	0x74
+	retlw	0x7b
+	retlw	0x82
+	retlw	0x8a
+	retlw	0x92
+	retlw	0x9a
+	retlw	0xa3
+	retlw	0xad
+	retlw	0xb8
+	retlw	0xc3
+	
+
+pacman_data	CODE_PACK
+
+pacman_wavetable_data
+        db      0x70, 0x70, 0x70, 0x70, 0x00, 0x70, 0x00, 0x00
+        db      0x90, 0xc0, 0xa0, 0xd0, 0x80, 0x80, 0x10, 0x10
+        db      0xa0, 0xe0, 0xc0, 0xb0, 0xf0, 0x60, 0x20, 0x20
+        db      0xb0, 0xe0, 0xd0, 0x80, 0x70, 0x90, 0x30, 0x30
+        db      0xc0, 0xd0, 0xe0, 0xb0, 0x10, 0x50, 0x40, 0x40
+        db      0xd0, 0xb0, 0xd0, 0xd0, 0x80, 0xa0, 0x50, 0x50
+        db      0xd0, 0x90, 0xc0, 0x90, 0xe0, 0x40, 0x60, 0x60
+        db      0xe0, 0xa0, 0xa0, 0x60, 0x70, 0xb0, 0x70, 0x70
+        db      0xe0, 0xb0, 0x70, 0xb0, 0x20, 0x30, 0x80, 0x80
+        db      0xe0, 0xb0, 0x40, 0xe0, 0x80, 0xc0, 0x90, 0x90
+        db      0xd0, 0xa0, 0x20, 0xc0, 0xd0, 0x20, 0xa0, 0xa0
+        db      0xd0, 0x90, 0x10, 0x70, 0x70, 0xd0, 0xb0, 0xb0
+        db      0xc0, 0x60, 0x00, 0x90, 0x30, 0x10, 0xc0, 0xc0
+        db      0xb0, 0x40, 0x10, 0xa0, 0x80, 0xe0, 0xd0, 0xd0
+        db      0xa0, 0x30, 0x20, 0x60, 0xc0, 0x00, 0xe0, 0xe0
+        db      0x90, 0x50, 0x40, 0x20, 0x70, 0xf0, 0xf0, 0xf0
+        db      0x70, 0x70, 0x70, 0x70, 0x40, 0x00, 0xf0, 0x00
+        db      0x50, 0x90, 0xb0, 0xc0, 0x80, 0xf0, 0xe0, 0x10
+        db      0x40, 0xb0, 0xd0, 0x80, 0xb0, 0x10, 0xd0, 0x20
+        db      0x30, 0xa0, 0xe0, 0x40, 0x70, 0xe0, 0xc0, 0x30
+        db      0x20, 0x80, 0xd0, 0x50, 0x50, 0x20, 0xb0, 0x40
+        db      0x10, 0x50, 0xb0, 0x70, 0x80, 0xd0, 0xa0, 0x50
+        db      0x10, 0x40, 0x70, 0x20, 0xa0, 0x30, 0x90, 0x60
+        db      0x00, 0x30, 0x30, 0x00, 0x70, 0xc0, 0x80, 0x70
+        db      0x00, 0x30, 0x10, 0x30, 0x60, 0x40, 0x70, 0x80
+        db      0x00, 0x40, 0x00, 0x80, 0x80, 0xb0, 0x60, 0x90
+        db      0x10, 0x50, 0x10, 0x50, 0x90, 0x50, 0x50, 0xa0
+        db      0x10, 0x30, 0x30, 0x10, 0x70, 0xa0, 0x40, 0xb0
+        db      0x20, 0x10, 0x70, 0x30, 0x70, 0x60, 0x30, 0xc0
+        db      0x30, 0x00, 0xe0, 0x60, 0x80, 0x90, 0x20, 0xd0
+        db      0x40, 0x00, 0x70, 0x30, 0x80, 0x70, 0x10, 0xe0
+        db      0x50, 0x20, 0x00, 0x10, 0x70, 0x80, 0x00, 0xf0
+        
+effect_table_0
+	
+; mspacman channel 1 effects (same for pacman)
+	
+	; 1  High Score or Free Life
+        db	0x73, 0x20, 0x00, 0x0C, 0x00, 0x0A, 0x1f, 0x00
+    ; 2  Waka or Coin
+		db	0x72, 0x20, 0xfb, 0x87, 0x00, 0x02, 0x0f, 0x00
+  
+; mspacman channels 2-3 effects
+
+	; 3  Pacman Siren 1
+        db  0x36, 0x20, 0x04, 0x8C, 0x00, 0x00, 0x06, 0x00
+
+	; 4  Pacman Siren 2
+        db  0x36, 0x28, 0x05, 0x8B, 0x00, 0x00, 0x06, 0x00
+
+	; 5  Pacman Siren 3
+        db  0x36, 0x30, 0x06, 0x8A, 0x00, 0x00, 0x06, 0x00
+
+	; 6  Pacman Siren 4
+        db  0x36, 0x3C, 0x07, 0x89, 0x00, 0x00, 0x06, 0x00
+
+	; 7  Pacman Siren 5
+        db  0x36, 0x48, 0x08, 0x88, 0x00, 0x00, 0x06, 0x00
+
+	; 8  Mrs. Pacman Ghosts Scared
+        db  0x24, 0x00, 0x06, 0x08, 0x00, 0x00, 0x0A, 0x00
+
+	; 9  Mrs. Pacman Eyes Return
+        db  0x40, 0x70, 0xFA, 0x10, 0x00, 0x00, 0x0A, 0x00
+
+	; 10  Waka1
+        db  0x42, 0x18, 0xFD, 0x06, 0x00, 0x01, 0x0C, 0x00
+
+	; 11  Waka2
+        db  0x42, 0x04, 0x03, 0x06, 0x00, 0x01, 0x0C, 0x00
+
+	; 12  Pacman Eat Fruit
+        db  0x56, 0x0C, 0xFF, 0x8C, 0x00, 0x02, 0x0F, 0x00
+
+	; 13  Pacman Eat Ghost
+        db  0x05, 0x00, 0x02, 0x20, 0x00, 0x01, 0x0C, 0x00
+
+	; 14  Pacman Dies
+        db  0x41, 0x20, 0xFF, 0x86, 0xFE, 0x1C, 0x0F, 0xFF
+
+
+; pacman channel 2-3 effects
+
+	; 15  Mrs. Pacman Eat Dot 1
+        db  0x59, 0x01, 0x06, 0x08, 0x00, 0x00, 0x02, 0x00
+
+	; 16  Mrs. Pacman Eat Dot 2
+        db  0x59, 0x01, 0x06, 0x09, 0x00, 0x00, 0x02, 0x00
+
+	; 17  Mrs. Pacman Siren 3
+        db  0x59, 0x02, 0x06, 0x0A, 0x00, 0x00, 0x02, 0x00
+
+	; 18  Mrs. Pacman Siren 4
+        db  0x59, 0x03, 0x06, 0x0B, 0x00, 0x00, 0x02, 0x00
+
+	; 19  Mrs. Pacman Siren 5
+        db  0x59, 0x04, 0x06, 0x0C, 0x00, 0x06, 0x02, 0x00
+
+	; 20  Pacman Ghosts Scared
+        db  0x24, 0x00, 0x06, 0x08, 0x02, 0x00, 0x0A, 0x00
+
+	; 21  Pacman Eyes Return
+        db  0x36, 0x07, 0x87, 0x6F, 0x00, 0x00, 0x04, 0x00
+
+	; 22  Eat Dot
+        db  0x1C, 0x70, 0x8B, 0x08, 0x00, 0x01, 0x06, 0x00
+
+	; 23  Mrs. Pacman Eat Ghost
+        db  0x56, 0x00, 0x02, 0x0A, 0x07, 0x03, 0x0C, 0x00
+
+	; 24  Mrs. Pacman Dies
+        db  0x36, 0x38, 0xFE, 0x12, 0xF8, 0x04, 0x0F, 0xFC
+
+	; 25  Unknown
+        db  0x22, 0x01, 0x01, 0x06, 0x00, 0x01, 0x07, 0x00
+
+            
+wave_table_0
+	dw	pac_start_1
+	dw	pac_start_2
+	dw	mspac_start_1
+	dw	mspac_start_2
+	dw	pac_act_1
+	dw	pac_act_2
+	dw	mspac_act1_1
+	dw	mspac_act1_2
+	dw	mspac_act2_1
+	dw	mspac_act2_2
+	dw	mspac_act3_1
+	dw	mspac_act3_2
+
+	
+	; pacman start (channel 1)
+pac_start_1
+	db	0xf1, 0x02, 0xf2, 0x03, 0xf3, 0x0f, 0xf4, 0x01
+	db	0x82, 0x70, 0x69, 0x82, 0x70, 0x69, 0x83, 0x70
+	db	0x6a, 0x83, 0x70, 0x6a, 0x82, 0x70, 0x69, 0x82
+	db	0x70, 0x69, 0x89, 0x8b, 0x8d, 0x8e, 0xff
+	
+	; pacman start (channel 2)	
+pac_start_2
+	db	0xf1, 0x00, 0xf2, 0x02, 0xf3, 0x0f, 0xf4, 0x00
+	db	0x42, 0x50, 0x4e, 0x50, 0x49, 0x50, 0x46, 0x50
+	db	0x4e, 0x49, 0x70, 0x66, 0x70, 0x43, 0x50, 0x4f
+	db	0x50, 0x4a, 0x50, 0x47, 0x50, 0x4f, 0x4a, 0x70
+	db	0x67, 0x70, 0x42, 0x50, 0x4e, 0x50, 0x49, 0x50
+	db	0x46, 0x50, 0x4e, 0x49, 0x70, 0x66, 0x70, 0x45
+	db	0x46, 0x47, 0x50, 0x47, 0x48, 0x49, 0x50, 0x49
+	db	0x4a, 0x4b, 0x50, 0x6e, 0xff
+	
+	; pacman act (channel 1)
+pac_act_1
+	db	0xf1, 0x02, 0xf2, 0x03, 0xf3, 0x0f, 0xf4, 0x01
+pac_act_1_loop
+	db	0x67, 0x50, 0x30, 0x47, 0x30, 0x67, 0x50, 0x30
+	db	0x47, 0x30, 0x67, 0x50, 0x30, 0x47, 0x30, 0x4b
+	db	0x10, 0x4c, 0x10, 0x4d, 0x10, 0x4e, 0x10, 0x67
+	db	0x50, 0x30, 0x47, 0x30, 0x67, 0x50, 0x30, 0x47
+	db	0x30, 0x67, 0x50, 0x30, 0x47, 0x30, 0x4b, 0x10
+	db	0x4c, 0x10, 0x4d, 0x10, 0x4e, 0x10, 0x67, 0x50
+	db	0x30, 0x47, 0x30, 0x67, 0x50, 0x30, 0x47, 0x30
+	db	0x67, 0x50, 0x30, 0x47, 0x30, 0x4b, 0x10, 0x4c
+	db	0x10, 0x4d, 0x10, 0x4e, 0x10, 0x77, 0x20, 0x4e
+	db	0x10, 0x4d, 0x10, 0x4c, 0x10, 0x4a, 0x10, 0x47
+	db	0x10, 0x46, 0x10, 0x65, 0x30, 0x66, 0x30, 0x67
+	db	0x40, 0x70, 0xf0, high(pac_act_1_loop)
+	db	low(pac_act_1_loop)
+	
+	; pacman act (channel 2)
+pac_act_2
+	db	0xf1, 0x01, 0xf2, 0x01, 0xf3, 0x0f, 0xf4, 0x00
+pac_act_2_loop
+	db	0x26, 0x67, 0x26, 0x67, 0x26, 0x67, 0x23, 0x44
+	db	0x42, 0x47, 0x30, 0x67, 0x2a, 0x8b, 0x70, 0x26
+	db	0x67, 0x26, 0x67, 0x26, 0x67, 0x23, 0x44, 0x42
+	db	0x47, 0x30, 0x67, 0x23, 0x84, 0x70, 0x26, 0x67
+	db	0x26, 0x67, 0x26, 0x67, 0x23, 0x44, 0x42, 0x47
+	db	0x30, 0x67, 0x29, 0x6a, 0x2b, 0x6c, 0x30, 0x2c
+	db	0x6d, 0x40, 0x2b, 0x6c, 0x29, 0x6a, 0x67, 0x20
+	db	0x29, 0x6a, 0x40, 0x26, 0x87, 0x70
+	db	0xf0, high(pac_act_2_loop), low(pac_act_2_loop)
+	
+	; mspacman start (channel 1)
+mspac_start_1
+	db	0xf1, 0x02, 0xf2, 0x03, 0xf3, 0x0a, 0xf4, 0x00
+	db	0x50, 0x70, 0x86, 0x90, 0x81, 0x90, 0x86, 0x90
+	db	0x68, 0x6a, 0x6b, 0x68, 0x6a, 0x68, 0x66, 0x6a
+	db	0x68, 0x66, 0x65, 0x68, 0x86, 0x81, 0x86, 0xff
+	
+	; mspacman start (channel 2)
+mspac_start_2
+	db	0xf1, 0x00, 0xf2, 0x02, 0xf3, 0x0a, 0xf4, 0x00
+	db	0x41, 0x43, 0x45, 0x86, 0x8a, 0x88, 0x8b, 0x6a
+	db	0x6b, 0x71, 0x6a, 0x88, 0x8b, 0x6a, 0x6b, 0x71
+	db	0x6a, 0x6b, 0x71, 0x73, 0x75, 0x96, 0x95, 0x96
+	db	0xff
+	
+	; mspacman act 1 (channel 1)
+mspac_act1_1
+	db	0xf1, 0x03, 0xf2, 0x03, 0xf3, 0x0a, 0xf4, 0x02
+	db	0x70, 0x66, 0x70, 0x46, 0x50, 0x86, 0x90, 0x70
+	db	0x66, 0x70, 0x46, 0x50, 0x86, 0x90, 0x70, 0x66
+	db	0x70, 0x46, 0x50, 0x86, 0x90, 0x70, 0x61, 0x70
+	db	0x41, 0x50, 0x81, 0x90, 0xf4, 0x00, 0xa6, 0xa4
+	db	0xa2, 0xa1, 0xf4, 0x01, 0x86, 0x89, 0x8b, 0x81
+	db	0x74, 0x71, 0x6b, 0x69, 0xa6, 0xff
+	
+	; mspacman act 1 (channel 2)
+mspac_act1_2
+	db	0xf1, 0x00, 0xf2, 0x02, 0xf3, 0x0a, 0xf4, 0x00
+	db	0x69, 0x6b, 0x69, 0x86, 0x61, 0x64, 0x65, 0x86
+	db	0x86, 0x64, 0x66, 0x64, 0x61, 0x69, 0x6b, 0x69
+	db	0x86, 0x61, 0x64, 0x64, 0xa1, 0x70, 0x71, 0x74
+	db	0x75, 0x35, 0x76, 0x30, 0x50, 0x35, 0x76, 0x30
+	db	0x50, 0x54, 0x56, 0x54, 0x51, 0x6b, 0x69, 0x6b
+	db	0x69, 0x6b, 0x91, 0x6b, 0x69, 0x66, 0xf2, 0x01
+	db	0x74, 0x76, 0x74, 0x71, 0x74, 0x71, 0x6b, 0x69
+	db	0xa6, 0xa6, 0xff
+	
+   	; mspacman act 2 (channel 1)
+mspac_act2_1
+        db      0xf1, 0x03, 0xf2, 0x03, 0xf3, 0x0a, 0xf4, 0x02
+        db      0x90, 0x7c, 0x7b, 0x7a, 0x79, 0x79, 0x78, 0x97
+        db      0x76, 0x75, 0x74, 0x73, 0x73, 0x72, 0x91, 0xa8
+        db      0x88, 0x60, 0x4a, 0x4c, 0x91, 0x95, 0x88, 0x95
+        db      0x91, 0x95, 0x88, 0x95, 0x91, 0x95, 0x88, 0x95
+        db      0x95, 0x98, 0x94, 0x97, 0x93, 0x96, 0x88, 0x96
+        db      0x93, 0x96, 0x88, 0x96, 0x93, 0x96, 0x88, 0x96
+        db      0xb6, 0xb3, 0x75, 0x76, 0x77, 0x78, 0x78, 0x75
+        db      0x73, 0x68, 0x91, 0x95, 0x88, 0x95, 0x91, 0x95
+        db      0x88, 0x95, 0x86, 0x96, 0x95, 0x92, 0x93, 0x8c
+        db      0x8a, 0x88, 0x86, 0x90, 0x90, 0x96, 0x95, 0x90
+        db      0x90, 0x86, 0x90, 0x96, 0x90, 0x96, 0x91, 0x88
+        db      0x81, 0xff
+	
+	; mspacman act 2 (channel 2)
+mspac_act2_2
+        db      0xf1, 0x00, 0xf2, 0x02, 0xf3, 0x0a, 0xf4, 0x00
+        db      0x88, 0x6c, 0x71, 0x72, 0x73, 0x73, 0x71, 0x93
+        db      0x6c, 0x73, 0x75, 0x76, 0x76, 0x75, 0x96, 0x7c
+        db      0x7a, 0x78, 0x76, 0x75, 0x96, 0x6c, 0x91, 0xa0
+        db      0x88, 0x75, 0x76, 0x77, 0x78, 0x71, 0x73, 0x74
+        db      0x75, 0x71, 0x75, 0x71, 0x68, 0x68, 0x65, 0x66
+        db      0x67, 0xa8, 0xab, 0xac, 0x8c, 0x86, 0x76, 0x75
+        db      0x6c, 0x71, 0x75, 0x73, 0x6b, 0x6c, 0x73, 0x76
+        db      0x7a, 0x78, 0x78, 0x76, 0x73, 0x6c, 0xaa, 0xa8
+        db      0x71, 0x73, 0x74, 0x75, 0x6a, 0x6b, 0x6c, 0x73
+        db      0x75, 0x76, 0x77, 0x78, 0x71, 0x73, 0x74, 0x75
+        db      0x71, 0x75, 0x71, 0x68, 0x48, 0x40, 0x68, 0x67
+        db      0x68, 0xaa, 0xa9, 0xaa, 0x6a, 0x60, 0x8a, 0x76
+        db      0x75, 0x73, 0x71, 0x71, 0x73, 0x95, 0x75, 0x73
+        db      0x71, 0x68, 0x68, 0x61, 0x63, 0x6a, 0xa8, 0x6c
+        db      0x76, 0x6a, 0x6c, 0x91, 0x90, 0x91, 0xff
+        
+	; mspacman act 3 (channel 1)
+mspac_act3_1        
+        db      0xf1, 0x02, 0xf2, 0x03, 0xf3, 0x0a, 0xf4, 0x02
+        db      0x65, 0x90, 0x68, 0x70, 0x68, 0x67, 0x66, 0x65
+        db      0x90, 0x61, 0x70, 0x61, 0x65, 0x68, 0x66, 0x90
+        db      0x63, 0x90, 0x86, 0x90, 0x85, 0x90, 0x85, 0x70
+        db      0x86, 0x68, 0x65, 0xff
+        
+ 	; mspacman act 3 (channel 2)
+mspac_act3_2          
+        db      0xf1, 0x00, 0xf2, 0x02, 0xf3, 0x0a, 0xf4, 0x00
+        db      0x65, 0x64, 0x65, 0x88, 0x67, 0x88, 0x61, 0x63
+        db      0x64, 0x85, 0x64, 0x85, 0x6a, 0x69, 0x6a, 0x8c
+        db      0x75, 0x93, 0x90, 0x91, 0x90, 0x91, 0x70, 0x8a
+        db      0x68, 0x71, 0xff        
+        
+        
+        END
