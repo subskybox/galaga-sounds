@@ -735,6 +735,11 @@ static void sound00_stop() {
 // "playing" gates the audio ISR (we set it true whenever any sound is active)
 static volatile bool playing = false;
 
+// Sequencer tick scheduling:
+// We derive the ~120 Hz Galaga refresh tick from the 62.5 kHz audio ISR so it keeps
+// running even if Timer0/micros() is delayed under heavy ISR load (e.g. sound 23).
+static volatile uint8_t g_seqTickPending = 0; // incremented in audio ISR, drained in loop()
+
 // Per-sound decoded parameters (set by get_data_for_sound)
 static uint8_t baseOffset   = 0;  // index into table4/states/positions
 static uint8_t numVoices    = 0;  // 1..3
@@ -1368,6 +1373,15 @@ static void trigger_sound(uint8_t sound) {
 
 // -------------------- Audio ISR (Timer1 @ 62500 Hz) --------------------
 ISR(TIMER1_COMPA_vect) {
+
+  // Derive a ~120 Hz sequencer tick from the 62.5 kHz audio ISR.
+  // 62500 / 521 ≈ 119.96 Hz.
+  static uint16_t seq_div = 0;
+  if (++seq_div >= 521) {
+    seq_div = 0;
+    if (g_seqTickPending != 0xFF) g_seqTickPending++; // saturate
+  }
+
   int16_t mix = 0;
 
   if (playing) {
@@ -1683,19 +1697,7 @@ void loop() {
 #if (AUDIO_OUT_MODE == AUDIO_OUT_R2R_6BIT_D2_D7)
   // Keep a fresh snapshot of PD0/PD1 (Serial pins) for the fast R2R DAC write.
   g_pd01_cache = (uint8_t)(PORTD & 0x03);
-#endif
-
-  // Galaga refresh tick using micros()
-  uint32_t now = micros();
-  
-  const uint32_t SEQ_US = 8333UL; // 120 Hz (tuned)
-  //const uint32_t SEQ_US = 16667UL;  // ~60 Hz
-
-  while ((uint32_t)(now - last60) >= SEQ_US) {
-    last60 += SEQ_US;
-    galaga_refresh_tick();
-  }
-
+#endif  // Galaga refresh ticks derived from the 62.5 kHz audio ISR (avoids reliance on Timer0/micros()).
   // Non-blocking serial line reader.
   // This avoids Serial.readStringUntil() timeouts (which can feel like "queuing")
   // when the serial monitor isn't sending a newline.
@@ -1745,7 +1747,7 @@ void loop() {
         }
         continue;
       }
-      lineBuf[lineLen] = ' ';
+      lineBuf[lineLen] = '\0';
       String line = String(lineBuf);
       lineLen = 0;
       handleCommandLine(line);
@@ -1785,6 +1787,20 @@ void loop() {
       lineBuf[lineLen] = '\0';
       handleCommandLine(String(lineBuf));
       lineLen = 0;
+    }
+  }
+
+  // Service a limited number of 120 Hz sequencer ticks per loop iteration
+  // so serial input stays responsive even during heavy sounds (e.g., sound 23).
+  {
+    uint8_t ticks = 0;
+    noInterrupts();
+    ticks = g_seqTickPending;
+    if (ticks > 1) ticks = 1;   // keep loop responsive
+    g_seqTickPending -= ticks;
+    interrupts();
+    while (ticks--) {
+      galaga_refresh_tick();
     }
   }
 
