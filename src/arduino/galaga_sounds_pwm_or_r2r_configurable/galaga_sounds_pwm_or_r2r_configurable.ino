@@ -264,15 +264,20 @@ static void audioInit() {
 
 // 6-bit resistor DAC on D2..D7:
 //   D2 = bit0 (LSB) ... D7 = bit5 (MSB). Uses PORTD bits 2..7; D0/D1 kept for Serial.
+// Cache PD0/PD1 state (Serial pins) so the audio ISR doesn't have to read PORTD every sample.
+// Updated from loop() and initialized in audioInit().
+volatile uint8_t g_pd01_cache = 0;
+
 static inline void audioWrite6(uint8_t code6 /*0..63*/) {
   code6 &= 0x3F;
-  uint8_t p = PORTD & 0b00000011;   // keep PD0-1 (Serial)
-  PORTD = p | (code6 << 2);         // set PD2-7
+  uint8_t v = (uint8_t)(g_pd01_cache | (code6 << 2));
+  asm volatile ("out %0, %1" :: "I" (_SFR_IO_ADDR(PORTD)), "r" (v));
 }
 
 static void audioInit() {
   // D2..D7 output, keep D0/D1 for Serial
   DDRD |= 0b11111100;
+  g_pd01_cache = (uint8_t)(PORTD & 0x03);
   audioWrite6(32); // midscale
 }
 
@@ -518,7 +523,17 @@ static volatile uint16_t acc16[3] = {0,0,0};   // 16-bit phase accumulator (hi b
 static volatile uint16_t inc16[3] = {0,0,0};   // 16-bit increment (same scaling as PIC low+mid bytes)
 
 static volatile uint8_t  volRaw[3] = {0,0,0};   // raw 8-bit vol; audio uses low nibble
+static volatile uint8_t  volISR[3] = {0,0,0};   // 0..15, already masked by gVoiceOutMask (precomputed; used in ISR)
 static volatile uint8_t  waveSel[3]= {0,0,0};   // 0..7
+
+// Precompute per-voice 4-bit volumes after applying gVoiceOutMask.
+// This removes per-sample masking/branching from the 62.5 kHz audio ISR.
+static inline void update_volISR() {
+  uint8_t m = gVoiceOutMask; // bit0..2 enable voices 0..2
+  volISR[0] = (m & 0x01) ? (uint8_t)(volRaw[0] & 0x0F) : 0;
+  volISR[1] = (m & 0x02) ? (uint8_t)(volRaw[1] & 0x0F) : 0;
+  volISR[2] = (m & 0x04) ? (uint8_t)(volRaw[2] & 0x0F) : 0;
+}
 
 // -------------------- Debug logging (sound00) --------------------
 // Prints a MAME-like trace line so you can compare Arduino behavior vs MAME.
@@ -1294,6 +1309,9 @@ if (do_sound[0x00]) {
       mute_sound_voices(s);
     }
   }
+
+  // Update ISR-ready volumes after any volRaw changes this tick.
+  update_volISR();
 }
 
 static void galaga_stop_all() {
@@ -1311,6 +1329,8 @@ static void galaga_stop_all() {
   inc16[0]  = inc16[1]  = inc16[2]  = 0;
   waveSel[0]= waveSel[1]= waveSel[2]= 0;
   acc16[0]  = acc16[1]  = acc16[2]  = 0;
+
+  update_volISR();
 
   playing = false;
   currentSound = -1;
@@ -1358,7 +1378,7 @@ ISR(TIMER1_COMPA_vect) {
     // - No per-voice volume branches (vol=0 contributes 0 via LUT)
     //
     // Voice 0
-    uint8_t vol0 = ((gVoiceOutMask & 0x01) ? (volRaw[0] & 0x0F) : 0);
+    uint8_t vol0 = volISR[0];
     acc16[0] += inc16[0];
     uint8_t acc0 = (uint8_t)(acc16[0] >> 8);
     uint8_t idx0 = (acc0 & 0xF8) | waveSel[0];
@@ -1366,7 +1386,7 @@ ISR(TIMER1_COMPA_vect) {
     mix += sampVolLUT[(s0 << 4) | vol0];
 
     // Voice 1
-    uint8_t vol1 = ((gVoiceOutMask & 0x02) ? (volRaw[1] & 0x0F) : 0);
+    uint8_t vol1 = volISR[1];
     acc16[1] += inc16[1];
     uint8_t acc1 = (uint8_t)(acc16[1] >> 8);
     uint8_t idx1 = (acc1 & 0xF8) | waveSel[1];
@@ -1374,10 +1394,10 @@ ISR(TIMER1_COMPA_vect) {
     mix += sampVolLUT[(s1 << 4) | vol1];
 
     // Voice 2
-    uint8_t vol2 = ((gVoiceOutMask & 0x04) ? (volRaw[2] & 0x0F) : 0);
+    uint8_t vol2 = volISR[2];
     acc16[2] += inc16[2];
     uint8_t acc2 = (uint8_t)(acc16[2] >> 8);
-    uint8_t idx2 = (acc2 & 0xF8) | (waveSel[2] & 0x07);
+    uint8_t idx2 = (acc2 & 0xF8) | (waveSel[2]);
     uint8_t s2   = prom4_ram[idx2];
     mix += sampVolLUT[(s2 << 4) | vol2];
   }
@@ -1518,6 +1538,7 @@ static void handleCommandLine(String line) {
     else if (ch >= 'a' && ch <= 'f') v = (uint8_t)(10 + (ch - 'a'));
     else if (ch >= 'A' && ch <= 'F') v = (uint8_t)(10 + (ch - 'A'));
     gVoiceOutMask = (v & 0x07);
+    update_volISR();
     Serial.print(F("Voice mask set to 0x"));
     Serial.println(gVoiceOutMask, HEX);
     return;
@@ -1632,11 +1653,17 @@ for (int16_t m = -192; m <= 192; m++) {
 }
 
   setupAudioTimer1_62500Hz();
+  update_volISR();
   Serial.println(F("Galaga audio ready. Send 0-23 or 0x00-0x17. Send 'stop'."));
 
 }
 
 void loop() {
+#if (AUDIO_OUT_MODE == AUDIO_OUT_R2R_6BIT_D2_D7)
+  // Keep a fresh snapshot of PD0/PD1 (Serial pins) for the fast R2R DAC write.
+  g_pd01_cache = (uint8_t)(PORTD & 0x03);
+#endif
+
   // Galaga refresh tick using micros()
   uint32_t now = micros();
   
