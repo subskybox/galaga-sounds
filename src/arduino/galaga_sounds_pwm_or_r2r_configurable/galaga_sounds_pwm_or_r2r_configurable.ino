@@ -154,8 +154,6 @@ static inline void sound23_stop_explosion() {
   interrupts();
 }
 
-
-// Galaga sound descriptions (index = sound number)
 // Galaga sound descriptions (index = sound number) stored in PROGMEM
 static const char s0[]  PROGMEM = "Ambience";
 static const char s1[]  PROGMEM = "Hit Capture Ship";
@@ -263,7 +261,7 @@ static void audioInit() {
 #elif (AUDIO_OUT_MODE == AUDIO_OUT_R2R_6BIT_D2_D7)
 
 // 6-bit resistor DAC on D2..D7:
-//   D2 = bit0 (LSB) ... D7 = bit5 (MSB). Uses PORTD bits 2..7; D0/D1 kept for Serial.
+// D2 = bit0 (LSB) ... D7 = bit5 (MSB). Uses PORTD bits 2..7; D0/D1 kept for Serial.
 // Cache PD0/PD1 state (Serial pins) so the audio ISR doesn't have to read PORTD every sample.
 // Updated from loop() and initialized in audioInit().
 volatile uint8_t g_pd01_cache = 0;
@@ -506,8 +504,8 @@ static int8_t currentSound = -1;
 static int8_t lastSoundCmd = -1;
 static bool suppressRepeatOnce = false;
 static uint8_t in_sound[24] = {0};
-
 static uint8_t prev_in_sound[24] = {0}; // previous in_sound[] snapshot for end-transition cleanup
+
 // Special looping counters (sound05/sound06 behavior)
 static uint8_t sound05_count   = 0;
 static uint8_t sound05_vol     = 0x0C;
@@ -563,7 +561,7 @@ static void sound00_log(bool isSegEvent,
                         uint8_t ws,
                         uint8_t vol) {
   // Keep it lightweight: build one line and print once.
-  // Format is intentionally close to the MAME line you shared.
+  // Format is intentionally close to the MAME log format
   char buf[180];
   // Example (MAME-ish):
   // CH1: 9211=0x01 tbl=1 st=00 t34=00 base=0x5C00 dRaw=0x0130 dSc=+0x0198 freq=0x5C00 inc=0x5C ws=0 vol=A
@@ -646,26 +644,26 @@ static void sound00_tick_update() {
   // Update voice 0 frequency from high byte of accumulator (H = acc >> 8)
   const uint8_t H = (uint8_t)(sound00_acc >> 8);
   // Galaga sound00 sets two bytes derived from H:
-//   b61 = H
-//   b62 = swap_nibbles(H)
-// which forms a 16-bit word 0xSWAP(H)H (little-endian 0xC55C when H=0x5C).
-// Using that as the phase increment matches the original mapping much better than 0xHH00.
-const uint8_t Hs = (uint8_t)((H << 4) | (H >> 4));   // swap nibbles
-const uint16_t wsgFreq = (uint16_t)(((uint16_t)Hs << 8) | (uint16_t)H);
+  //   b61 = H
+  //   b62 = swap_nibbles(H)
+  // which forms a 16-bit word 0xSWAP(H)H (little-endian 0xC55C when H=0x5C).
+  // Using that as the phase increment matches the original mapping much better than 0xHH00.
+  const uint8_t Hs = (uint8_t)((H << 4) | (H >> 4));   // swap nibbles
+  const uint16_t wsgFreq = (uint16_t)(((uint16_t)Hs << 8) | (uint16_t)H);
 
-// For MAME trace comparison we still compute the packed word above (b62:b61 = swap(H):H).
-// But for *audio generation* we must feed the oscillator with a smoothly increasing phase increment.
-// The Z80/MAME trace treats the effective increment as the high-byte-derived base (H<<8), with inc=H.
-// If we shift the packed word directly (0xC55C >> 8 = 0xC5, but 0x0660 >> 8 = 0x06), it "wraps"
-// at nibble boundaries and creates the high-pitched chirps you heard.
-// So: drive the phase increment from base = (H<<8), scaled down by a shift (default 8 => phiInc ~= H).
-const uint16_t base16 = (uint16_t)H << 8;
+  // For MAME trace comparison we still compute the packed word above (b62:b61 = swap(H):H).
+  // But for *audio generation* we must feed the oscillator with a smoothly increasing phase increment.
+  // The Z80/MAME trace treats the effective increment as the high-byte-derived base (H<<8), with inc=H.
+  // If we shift the packed word directly (0xC55C >> 8 = 0xC5, but 0x0660 >> 8 = 0x06), it "wraps"
+  // at nibble boundaries and creates the high-pitched chirps.
+  // So: drive the phase increment from base = (H<<8), scaled down by a shift (default 8 => phiInc ~= H).
+  const uint16_t base16 = (uint16_t)H << 8;
 
-// Sound00 uses wavetable 0, volume A, single voice (voice0)
-waveSel[0] = 0;         // ws=0
-volRaw[0]  = 0x0A;      // vol=A
-const uint16_t phiInc = (uint16_t)(base16 >> gSound00FreqShift);
-inc16[0]   = phiInc;
+  // Sound00 uses wavetable 0, volume A, single voice (voice0)
+  waveSel[0] = 0;         // ws=0
+  volRaw[0]  = 0x0A;      // vol=A
+  const uint16_t phiInc = (uint16_t)(base16 >> gSound00FreqShift);
+  inc16[0]   = phiInc;
 
   // Optional MAME-like debug logging
   if (gSound00LogTicks || gSound00LogSegments) {
@@ -702,7 +700,7 @@ inc16[0]   = phiInc;
 
     // Advance segment 0..7. When we wrap back to 0, the *main CPU* would flip byte_9211
     // (01 <-> FF), which switches between TABLE1+TABLE2 bases (up) and TABLE2 negative steps+bases (down).
-    // Your MAME observation: the flip is slow (~every couple of seconds), which corresponds well to
+    // MAME observation: the flip is slow (~every couple of seconds), which corresponds well to
     // running the full 8-segment pattern before switching direction.
     sound00_seg++;
     if (sound00_seg >= 8) {
@@ -1614,11 +1612,34 @@ static void handleCommandLine(String line) {
 }
 
 
+
+#if defined(ARDUINO_ARCH_AVR)
+// --- Raw UART RX polling (bypasses Serial RX interrupt buffering) ---
+// Why: At 62.5 kHz audio ISR, the UART RX interrupt can be starved and characters get dropped,
+// which makes it look like "sound 23 can't be stopped".
+// We disable RXCIE0 and poll RXC0 directly for maximum robustness.
+static inline bool uart_rx_ready() {
+  return (UCSR0A & _BV(RXC0));
+}
+static inline uint8_t uart_read_byte() {
+  return UDR0;
+}
+#else
+static inline bool uart_rx_ready() { return false; }
+static inline uint8_t uart_read_byte() { return 0; }
+#endif
+
+
 void setup() {
 
   Serial.begin(115200);
 
-  audioInit();
+  
+#if defined(ARDUINO_ARCH_AVR)
+  // Disable UART RX interrupt; we poll RX in loop() to avoid dropped bytes under heavy ISR load.
+  UCSR0B &= (uint8_t)~_BV(RXCIE0);
+#endif
+audioInit();
   delay(50);
 
   memset(states_, 0, sizeof(states_));
@@ -1683,9 +1704,33 @@ void loop() {
   static uint32_t lastCharUs = 0;
 
 
-  while (Serial.available()) {
-    char c = (char)Serial.read();
+  while (Serial.available() || uart_rx_ready()) {
+    char c = Serial.available() ? (char)Serial.read() : (char)uart_read_byte();
     lastCharUs = micros();
+
+    // Normalize CRLF so Enter counts once.
+    static bool lastWasCR = false;
+    if (c == '\r') {
+      c = '\n';
+      lastWasCR = true;
+    } else if (c == '\n' && lastWasCR) {
+      lastWasCR = false;
+      continue;
+    } else {
+      lastWasCR = false;
+    }
+
+    // Immediate single-character stop (does not require newline)
+    if (c == '`' || c == '!') {
+      galaga_stop_all();
+      Serial.println(F("Stopped (all sounds)."));
+      // Clear state so an empty-line repeat can't retrigger anything.
+      lastSoundCmd = -1;
+      currentSound = -1;
+      suppressRepeatOnce = true;
+      lineLen = 0;
+      continue;
+    }
 
     // End-of-line: process buffered command if present.
     // If the line is empty, repeat the last sound command.
@@ -1715,12 +1760,15 @@ void loop() {
     if (lineLen < (sizeof(lineBuf) - 1)) {
       lineBuf[lineLen++] = c;
 
-      // If we're receiving raw digits with no newline (e.g. `screen`),
+      // If we're receiving *two digits* with no newline (e.g. `screen` sending "23"),
       // auto-trigger once we have 2 digits (max for 0-23).
-      if (lineLen == 2) {
+      // IMPORTANT: only do this for digits; otherwise commands like "m7" would execute,
+      // then the following newline would be seen as an empty line and would "repeat last sound".
+      if (lineLen == 2 && isDigit((uint8_t)lineBuf[0]) && isDigit((uint8_t)lineBuf[1])) {
         lineBuf[lineLen] = '\0';
         handleCommandLine(String(lineBuf));
         lineLen = 0;
+        suppressRepeatOnce = true; // swallow the upcoming Enter/newline if present
       }
 
     } else {
